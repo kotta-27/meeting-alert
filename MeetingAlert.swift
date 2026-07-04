@@ -228,15 +228,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let f = DateFormatter()
             f.dateFormat = "HH:mm"
             for m in upcoming {
+                let title = "  \(f.string(from: m.startDate))  \(m.title)"
                 if let url = m.joinURL {
-                    let item = NSMenuItem(title: "  \(f.string(from: m.startDate))  \(m.title)", action: #selector(openMeetingURL(_:)), keyEquivalent: "")
+                    let item = NSMenuItem(title: title, action: #selector(openMeetingURL(_:)), keyEquivalent: "")
                     item.target = self
                     item.representedObject = url
                     item.image = NSImage(systemSymbolName: "video.fill", accessibilityDescription: nil)
                     menu.addItem(item)
                 } else {
-                    let item = NSMenuItem(title: "  ・ \(f.string(from: m.startDate))  \(m.title)", action: nil, keyEquivalent: "")
-                    item.isEnabled = false
+                    let item = NSMenuItem(title: title, action: #selector(noOp), keyEquivalent: "")
+                    item.target = self
                     menu.addItem(item)
                 }
             }
@@ -298,6 +299,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         buildMenu(upcoming: lastUpcoming)
     }
+
+    @objc func noOp() {}
 
     @objc func openMeetingURL(_ sender: NSMenuItem) {
         if let url = sender.representedObject as? URL {

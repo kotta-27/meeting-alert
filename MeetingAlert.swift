@@ -353,6 +353,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             win.level = .screenSaver
             win.isOpaque = false
             win.backgroundColor = NSColor.black.withAlphaComponent(0.88)
+            // 黒背景オーバーレイ上ではシステムのLight/Darkに関わらず常に明色でレンダリング
+            win.appearance = NSAppearance(named: .darkAqua)
             win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             win.isReleasedWhenClosed = false
             win.contentView = makeOverlayView(for: meeting, frame: screen.frame)

@@ -439,7 +439,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func button(_ title: String, action: Selector) -> NSButton {
-        let b = NSButton(title: title, target: self, action: action)
+        let b = HoverButton(title: title, target: self, action: action)
         b.bezelStyle = .rounded
         b.controlSize = .large
         b.font = NSFont.systemFont(ofSize: 18, weight: .medium)
@@ -529,6 +529,68 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         p.standardOutput = Pipe(); p.standardError = Pipe()
         try? p.run(); p.waitUntilExit()
         return p.terminationStatus == 0
+    }
+}
+
+// MARK: - HoverButton
+
+/// オーバーレイのボタン用: マウスホバー時に軽い視覚フィードバック（透明度アニメーション + ポインタカーソル）を出す。
+/// システム標準の NSButton だと Light/Dark 問わずホバー時の見た目が地味なので、フルスクリーン警告 UI としての手応えを補強する目的。
+final class HoverButton: NSButton {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        wantsLayer = true
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas { removeTrackingArea(area) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            owner: self,
+            userInfo: nil)
+        addTrackingArea(area)
+    }
+
+    private var cursorPushed = false
+
+    override func mouseEntered(with event: NSEvent) {
+        if !cursorPushed {
+            NSCursor.pointingHand.push()
+            cursorPushed = true
+        }
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.12
+            ctx.allowsImplicitAnimation = true
+            animator().alphaValue = 0.7
+        }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        if cursorPushed {
+            NSCursor.pop()
+            cursorPushed = false
+        }
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.12
+            ctx.allowsImplicitAnimation = true
+            animator().alphaValue = 1.0
+        }
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        // window が消える／張り替わるタイミングで pop 忘れを防ぐ
+        if newWindow == nil, cursorPushed {
+            NSCursor.pop()
+            cursorPushed = false
+        }
     }
 }
 

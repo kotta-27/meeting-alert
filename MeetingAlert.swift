@@ -250,14 +250,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
-        // Lead time (複数選択可)
+        // Lead time (複数選択可 — カスタムビューでメニューを閉じない)
         let leadMenu = NSMenu()
         let current = leadTimeMinutesList
         for minutes in [1, 3, 5, 10, 15, 30] {
-            let item = NSMenuItem(title: "\(minutes)分前", action: #selector(toggleLeadTime(_:)), keyEquivalent: "")
-            item.target = self
-            item.tag = minutes
-            item.state = current.contains(minutes) ? .on : .off
+            let item = NSMenuItem()
+            let view = CheckboxMenuItemView(title: "\(minutes)分前", checked: current.contains(minutes))
+            view.onToggle = { [weak self, weak view] in
+                guard let self else { return }
+                var list = self.leadTimeMinutesList
+                if list.contains(minutes) {
+                    list.remove(minutes)
+                    if list.isEmpty { list.insert(minutes) }
+                } else {
+                    list.insert(minutes)
+                }
+                self.leadTimeMinutesList = list
+                view?.setChecked(list.contains(minutes))
+            }
+            item.view = view
             leadMenu.addItem(item)
         }
         let leadItem = NSMenuItem(title: "通知タイミング", action: nil, keyEquivalent: "")
@@ -312,18 +323,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let url = sender.representedObject as? URL {
             NSWorkspace.shared.open(url)
         }
-    }
-
-    @objc func toggleLeadTime(_ sender: NSMenuItem) {
-        var list = leadTimeMinutesList
-        if list.contains(sender.tag) {
-            list.remove(sender.tag)
-            if list.isEmpty { list.insert(sender.tag) }
-        } else {
-            list.insert(sender.tag)
-        }
-        leadTimeMinutesList = list
-        poll()
     }
 
     @objc func openPrivacySettings() {
@@ -544,6 +543,82 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         p.standardOutput = Pipe(); p.standardError = Pipe()
         try? p.run(); p.waitUntilExit()
         return p.terminationStatus == 0
+    }
+}
+
+// MARK: - CheckboxMenuItemView
+
+/// 通知タイミングの複数選択メニュー項目。mouseDown で super を呼ばないことで
+/// NSMenu が閉じるのを防ぎ、連続してチェックを切り替えられるようにする。
+final class CheckboxMenuItemView: NSView {
+    private(set) var checked: Bool
+    private let checkLabel: NSTextField
+    private let titleLabel: NSTextField
+    var onToggle: (() -> Void)?
+
+    init(title: String, checked: Bool) {
+        self.checked = checked
+        checkLabel = NSTextField(labelWithString: "")
+        titleLabel = NSTextField(labelWithString: title)
+        super.init(frame: NSRect(x: 0, y: 0, width: 180, height: 20))
+        wantsLayer = true
+
+        for tf in [checkLabel, titleLabel] {
+            tf.isBordered = false
+            tf.isEditable = false
+            tf.drawsBackground = false
+            tf.font = NSFont.menuFont(ofSize: 0)
+            tf.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(tf)
+        }
+        NSLayoutConstraint.activate([
+            checkLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+            checkLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            checkLabel.widthAnchor.constraint(equalToConstant: 18),
+            titleLabel.leadingAnchor.constraint(equalTo: checkLabel.trailingAnchor, constant: 4),
+            titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        refreshUI(highlighted: false)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    func setChecked(_ value: Bool) {
+        checked = value
+        checkLabel.stringValue = value ? "✓" : ""
+    }
+
+    private func refreshUI(highlighted: Bool) {
+        checkLabel.stringValue = checked ? "✓" : ""
+        if highlighted {
+            layer?.backgroundColor = NSColor.selectedContentBackgroundColor.cgColor
+            checkLabel.textColor = .selectedMenuItemTextColor
+            titleLabel.textColor = .selectedMenuItemTextColor
+        } else {
+            layer?.backgroundColor = .clear
+            checkLabel.textColor = .labelColor
+            titleLabel.textColor = .labelColor
+        }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for a in trackingAreas { removeTrackingArea(a) }
+        addTrackingArea(NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self, userInfo: nil))
+    }
+
+    override func mouseEntered(with event: NSEvent) { refreshUI(highlighted: true) }
+    override func mouseExited(with event: NSEvent) { refreshUI(highlighted: false) }
+
+    override func mouseDown(with event: NSEvent) {
+        checked.toggle()
+        checkLabel.stringValue = checked ? "✓" : ""
+        onToggle?()
+        // super を呼ばない → NSMenu が mouseUp を検知せず閉じない
     }
 }
 

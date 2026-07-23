@@ -29,6 +29,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var syncTimer: Timer?
     var lastUpcoming: [Meeting] = []
     var lastGoogleSyncAt: Date? = nil
+    // [meetingID: [leadMinutes: Timer]] — 各アラートを精密タイマーで個別管理
+    var scheduledAlertTimers: [String: [Int: Timer]] = [:]
 
     var leadTimeMinutesList: Set<Int> {
         get {
@@ -102,7 +104,30 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateStatusTitle()
         buildMenu(upcoming: lastUpcoming)
 
-        // Fire alerts
+        // Fire alerts — 精密タイマーでスケジュール
+        scheduleAlerts(for: meetings)
+        // Prune old IDs
+        if alertedIDs.count > 200 { alertedIDs.removeAll() }
+    }
+
+    func scheduleAlerts(for meetings: [Meeting]) {
+        let now = Date()
+        let currentLeads = leadTimeMinutesList
+        let activeMeetingIDs = Set(meetings.map { $0.id })
+
+        // 消えた会議のタイマーをキャンセル
+        for id in Array(scheduledAlertTimers.keys) where !activeMeetingIDs.contains(id) {
+            scheduledAlertTimers[id]!.values.forEach { $0.invalidate() }
+            scheduledAlertTimers.removeValue(forKey: id)
+        }
+        // 解除されたリードタイムのタイマーをキャンセル
+        for id in Array(scheduledAlertTimers.keys) {
+            for lead in Array(scheduledAlertTimers[id]!.keys) where !currentLeads.contains(lead) {
+                scheduledAlertTimers[id]![lead]?.invalidate()
+                scheduledAlertTimers[id]!.removeValue(forKey: lead)
+            }
+        }
+
         for m in meetings {
             if let snooze = snoozedUntil[m.id] {
                 if now >= snooze && now < m.endDate {
@@ -111,17 +136,34 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
                 continue
             }
-            for lead in leadTimeMinutesList.sorted().reversed() {
+            for lead in currentLeads {
                 let alertID = "\(m.id)_\(lead)"
+                guard !alertedIDs.contains(alertID) else { continue }
+                guard scheduledAlertTimers[m.id]?[lead] == nil else { continue }
+
                 let alertAt = m.startDate.addingTimeInterval(-TimeInterval(lead * 60))
-                if now >= alertAt && now < m.startDate.addingTimeInterval(60) && !alertedIDs.contains(alertID) {
-                    alertedIDs.insert(alertID)
-                    showOverlay(for: m)
+                if alertAt <= now {
+                    // すでに過ぎていたら即発火(ウィンドウ内のみ)
+                    if now < m.startDate.addingTimeInterval(60) {
+                        alertedIDs.insert(alertID)
+                        showOverlay(for: m)
+                    }
+                } else {
+                    // 精密タイマーで alertAt ちょうどに発火
+                    if scheduledAlertTimers[m.id] == nil { scheduledAlertTimers[m.id] = [:] }
+                    scheduledAlertTimers[m.id]![lead] = Timer.scheduledTimer(
+                        withTimeInterval: alertAt.timeIntervalSinceNow,
+                        repeats: false
+                    ) { [weak self] _ in
+                        guard let self else { return }
+                        self.scheduledAlertTimers[m.id]?.removeValue(forKey: lead)
+                        guard !self.alertedIDs.contains(alertID), Date() < m.endDate else { return }
+                        self.alertedIDs.insert(alertID)
+                        self.showOverlay(for: m)
+                    }
                 }
             }
         }
-        // Prune old IDs
-        if alertedIDs.count > 200 { alertedIDs.removeAll() }
     }
 
     func isDeclined(_ ev: EKEvent) -> Bool {

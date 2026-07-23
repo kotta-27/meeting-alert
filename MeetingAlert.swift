@@ -30,9 +30,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var lastUpcoming: [Meeting] = []
     var lastGoogleSyncAt: Date? = nil
 
-    var leadTimeMinutes: Int {
-        get { max(UserDefaults.standard.integer(forKey: "leadTimeMinutes"), 0) == 0 ? 1 : UserDefaults.standard.integer(forKey: "leadTimeMinutes") }
-        set { UserDefaults.standard.set(newValue, forKey: "leadTimeMinutes") }
+    var leadTimeMinutesList: Set<Int> {
+        get {
+            let saved = UserDefaults.standard.array(forKey: "leadTimeMinutesList") as? [Int] ?? []
+            return saved.isEmpty ? [1] : Set(saved)
+        }
+        set { UserDefaults.standard.set(Array(newValue), forKey: "leadTimeMinutesList") }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -100,9 +103,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         buildMenu(upcoming: lastUpcoming)
 
         // Fire alerts
-        let lead = TimeInterval(leadTimeMinutes * 60)
         for m in meetings {
-            let alertAt = m.startDate.addingTimeInterval(-lead)
             if let snooze = snoozedUntil[m.id] {
                 if now >= snooze && now < m.endDate {
                     snoozedUntil.removeValue(forKey: m.id)
@@ -110,9 +111,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
                 continue
             }
-            if now >= alertAt && now < m.startDate.addingTimeInterval(60) && !alertedIDs.contains(m.id) {
-                alertedIDs.insert(m.id)
-                showOverlay(for: m)
+            for lead in leadTimeMinutesList.sorted().reversed() {
+                let alertID = "\(m.id)_\(lead)"
+                let alertAt = m.startDate.addingTimeInterval(-TimeInterval(lead * 60))
+                if now >= alertAt && now < m.startDate.addingTimeInterval(60) && !alertedIDs.contains(alertID) {
+                    alertedIDs.insert(alertID)
+                    showOverlay(for: m)
+                }
             }
         }
         // Prune old IDs
@@ -245,13 +250,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
-        // Lead time
+        // Lead time (複数選択可)
         let leadMenu = NSMenu()
-        for minutes in [1, 3, 5, 10] {
-            let item = NSMenuItem(title: "\(minutes)分前", action: #selector(setLeadTime(_:)), keyEquivalent: "")
+        let current = leadTimeMinutesList
+        for minutes in [1, 3, 5, 10, 15, 30] {
+            let item = NSMenuItem(title: "\(minutes)分前", action: #selector(toggleLeadTime(_:)), keyEquivalent: "")
             item.target = self
             item.tag = minutes
-            item.state = leadTimeMinutes == minutes ? .on : .off
+            item.state = current.contains(minutes) ? .on : .off
             leadMenu.addItem(item)
         }
         let leadItem = NSMenuItem(title: "通知タイミング", action: nil, keyEquivalent: "")
@@ -308,8 +314,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    @objc func setLeadTime(_ sender: NSMenuItem) {
-        leadTimeMinutes = sender.tag
+    @objc func toggleLeadTime(_ sender: NSMenuItem) {
+        var list = leadTimeMinutesList
+        if list.contains(sender.tag) {
+            list.remove(sender.tag)
+            if list.isEmpty { list.insert(sender.tag) }
+        } else {
+            list.insert(sender.tag)
+        }
+        leadTimeMinutesList = list
         poll()
     }
 
